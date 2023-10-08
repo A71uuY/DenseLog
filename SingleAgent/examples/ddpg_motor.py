@@ -195,18 +195,10 @@ class TemperatureWrapper(Wrapper):
         return result
     
     def _add_temperature_reward_pdl(self,temperature,reward):
-        # lagrange_multiplier = self._compute_lagrange(temperature)
-        # if lagrange_multiplier != 0:
-            # kk=1
-        # if self._constrained:
-            # reward = reward + lagrange_multiplier
         if self._pointer % 20 == 0:
             self.label_densities = self.cal_lab_density()
         punish_term = 0
         dv = self.label_densities
-        # if np.sum([c.get_bool(dv) for c in self.constraints]) == len(self.constraints): # Don't punish when satisfied
-        # if np.all([c.get_bool(dv) for c in self.constraints]):
-            # return reward
         l = self.s_to_l(temperature)
         for formula in self.constraints:
             density_value = formula.get_val(dv) # value of Ax+b < 0
@@ -214,11 +206,7 @@ class TemperatureWrapper(Wrapper):
                 pass
             else:
                 lagrange = formula.get_multiplier(l) # neg: give reward; pos: give punish
-                # res = density_value*lagrange
-                # res = lagrange
                 punish_term += lagrange
-                # if lagrange > 0:
-                #     print(l)
         if self._constrained == 1:
             reward = reward-punish_term
         
@@ -229,15 +217,11 @@ class TemperatureWrapper(Wrapper):
         self._pointer = self._pointer + 1
         if self._pointer == np.prod(self.MEMORY_SIZE) * self.MEMORY_EXPAND:
             self._pointer = 0
-            # self._lagrange_memory_prev = np.copy(self._lagrange_memory_curr)
-            # self._update_lagrange_interp()
+
             self._update_kernel_width()
             self.label_densities = self.cal_lab_density() # update label density
             for formula in self.constraints:
-                formula.update_multiplier(np.array(self.label_densities), min_val=self.min_lag, max_val=self.max_lag) # Repsect to setting in DCRL
-            # self.density_satisfied = self._visualize_density(os.path.join(
-            #     self._output_dir, 'visualize', 
-            #     'density_plot_{}.png'.format(self._num_updates)))
+                formula.update_multiplier(np.array(self.label_densities), min_val=self.min_lag, max_val=self.max_lag) # Repsect to setting in DCRL)
             if self._save_traj:
                 self._save_trajectory()
             self._save_weights()

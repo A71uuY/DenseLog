@@ -432,8 +432,7 @@ def main(obj_name, algo_name, env_name, task_name, constraint_threshold=0.05):
 
 
 if __name__ == "__main__":
-    # main('MaxRew','ModRew','FairGamble','MDCE')
-    #main('MaxRew','constrained','CaE','value-10')
+    # Please use the 'PDL' lines for running propositional-density-logic (DenseLog) cases.
     #main('DBCE','DBCE','Hunt','balance')
     # main('DBCE','DBCE','FairGamble','PDL_disj')
     # main('DBCE','DBCE','FairGamble','disj_obj1')

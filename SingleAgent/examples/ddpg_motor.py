@@ -33,7 +33,7 @@ class TemperatureWrapper(Wrapper):
     BETA = 1.0
     LAGRANGE_GRID_WIDTH = 0.02
     def __init__(self, environment, density_max_func, constrained=True, 
-                output_dir='outputs', gamma=0.99, save_traj=False, min_lag = 2, max_lag = 20, alg='pdl',beta=1):
+                output_dir='outputs', gamma=0.99, save_traj=False, min_lag = 2, max_lag = 20, alg='pdl',beta=1,cons_used=1):
         super().__init__(environment)
         self.temperature = 0.0
         self._kernel_width = 0.5
@@ -74,7 +74,12 @@ class TemperatureWrapper(Wrapper):
         self.max_lag = max_lag
         self.alg = alg
         self.beta=beta
-        self.constraints = self.init_constraints()
+        if cons_used==1:
+            self.constraints = self.init_constraints()
+        elif cons_used==2:
+            self.constraints = self.init_constraints_2()
+        elif cons_used==3:
+            self.constraints = self.init_constraints_3()
 
     def s_to_l(self,temp):
         if temp <= 0.1:
@@ -114,6 +119,46 @@ class TemperatureWrapper(Wrapper):
         phis = [phi_abd,phi_acd]
         return phis
     
+    def init_constraints_2(self):
+        # (l4>10 -> l3 < 20) and (l3>20 -> (l1+l2)>40)
+        # (l4<10 or l3 < 20) and (l3<20 or (l1+l2)>40)
+        a1 = Atomic(5,np.array([0,0,0,0,1]),np.array([0,0,0,-100,0]),default_beta=self.beta) # l4 <= 10
+        phia = AtomFormula(a1)
+
+        a2 = Atomic(5,np.array([0,0,0,1,0]),np.array([0,0,0,-100,0]),default_beta=self.beta) # l3 < 20
+        phib = AtomFormula(a2)
+
+        a2 = Atomic(5,np.array([0,0,0,1,0]),np.array([0,0,0,-100,0]),default_beta=self.beta) # l3 < 20
+        phib = AtomFormula(a2)
+
+        a4 = Atomic(5,np.array([-1,-1,0,0,0]),np.array([400,0,0,0,0]),default_beta=self.beta) # l1+l2 > 40
+        phic = AtomFormula(a4)
+        
+        phi_ab = OrFormula(phia,phib)
+        phi_bc = OrFormula(phib,phic)
+        phis = [phi_ab,phi_bc]
+        return phis
+
+    def init_constraints_3(self):
+        # (l4>10 -> l3 < 20) and (l2.5 < 20 -> l1>40)
+        # (l4<10 or l3 < 20) and (l2.5 < 20 or l1>20)
+        a1 = Atomic(5,np.array([0,0,0,0,1]),np.array([0,0,0,-100,0]),default_beta=self.beta) # l4 <= 10
+        phia = AtomFormula(a1)
+
+        a2 = Atomic(5,np.array([0,0,0,1,0]),np.array([0,0,0,-100,0]),default_beta=self.beta) # l3 < 20
+        phib = AtomFormula(a2)
+
+        a2 = Atomic(5,np.array([0,0,1,0,0]),np.array([0,0,0,-100,0]),default_beta=self.beta) # l2.5 < 20
+        phic = AtomFormula(a2)
+
+        a4 = Atomic(5,np.array([-1,0,0,0,0]),np.array([200,0,0,0,0]),default_beta=self.beta) # l1 > 20
+        phid = AtomFormula(a4)
+        
+        phi_ab = OrFormula(phia,phib)
+        phi_cd = OrFormula(phic,phid)
+        phis = [phi_ab,phi_cd]
+        return phis
+
     def cal_lab_density(self):
         # This function should return density of labels in 
         # state_dens = [self._get_density_prev(t) for t in np.arange(0,1,0.01)]
@@ -195,10 +240,18 @@ class TemperatureWrapper(Wrapper):
         return result
     
     def _add_temperature_reward_pdl(self,temperature,reward):
+        # lagrange_multiplier = self._compute_lagrange(temperature)
+        # if lagrange_multiplier != 0:
+            # kk=1
+        # if self._constrained:
+            # reward = reward + lagrange_multiplier
         if self._pointer % 20 == 0:
             self.label_densities = self.cal_lab_density()
         punish_term = 0
         dv = self.label_densities
+        # if np.sum([c.get_bool(dv) for c in self.constraints]) == len(self.constraints): # Don't punish when satisfied
+        # if np.all([c.get_bool(dv) for c in self.constraints]):
+            # return reward
         l = self.s_to_l(temperature)
         for formula in self.constraints:
             density_value = formula.get_val(dv) # value of Ax+b < 0
@@ -206,7 +259,11 @@ class TemperatureWrapper(Wrapper):
                 pass
             else:
                 lagrange = formula.get_multiplier(l) # neg: give reward; pos: give punish
+                # res = density_value*lagrange
+                # res = lagrange
                 punish_term += lagrange
+                # if lagrange > 0:
+                #     print(l)
         if self._constrained == 1:
             reward = reward-punish_term
         
@@ -217,11 +274,15 @@ class TemperatureWrapper(Wrapper):
         self._pointer = self._pointer + 1
         if self._pointer == np.prod(self.MEMORY_SIZE) * self.MEMORY_EXPAND:
             self._pointer = 0
-
+            # self._lagrange_memory_prev = np.copy(self._lagrange_memory_curr)
+            # self._update_lagrange_interp()
             self._update_kernel_width()
             self.label_densities = self.cal_lab_density() # update label density
             for formula in self.constraints:
-                formula.update_multiplier(np.array(self.label_densities), min_val=self.min_lag, max_val=self.max_lag) # Repsect to setting in DCRL)
+                formula.update_multiplier(np.array(self.label_densities), min_val=self.min_lag, max_val=self.max_lag) # Repsect to setting in DCRL
+            # self.density_satisfied = self._visualize_density(os.path.join(
+            #     self._output_dir, 'visualize', 
+            #     'density_plot_{}.png'.format(self._num_updates)))
             if self._save_traj:
                 self._save_trajectory()
             self._save_weights()
@@ -346,6 +407,7 @@ if __name__ == '__main__':
     parser.add_argument("--min_lag", type=float, default=2)
     parser.add_argument("--alg",type=str,default='pdl')
     parser.add_argument("--beta",type=float,default=1)
+    parser.add_argument("--cons_used",type=float,default=1)
     args = parser.parse_args()
     # Create the environment
     # Default DcSeries Motor Parameters are changed to have more dynamic system and to see faster learning results.
@@ -401,7 +463,7 @@ if __name__ == '__main__':
     )
     env = TemperatureWrapper(
         env, density_max_func, args.constrained, gamma=0.95, output_dir=args.output,
-        save_traj=True,min_lag=args.min_lag,max_lag=args.max_lag,alg=args.alg,beta=args.beta
+        save_traj=True,min_lag=args.min_lag,max_lag=args.max_lag,alg=args.alg,beta=args.beta,cons_used=args.cons_used
     )
 
     # Keras-rl DDPG-agent accepts flat observations only
